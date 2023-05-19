@@ -1,10 +1,13 @@
+use super::Grid;
+
+/// Stores grid and depth where the solution was found
 #[derive(Clone, Debug)]
 pub struct Solution {
-    pub data: Vec<u8>,
-    pub depth: usize, //counts recursion cycles
+    pub grid: Grid,
+    pub depth: usize,
 }
 impl Solution {
-    pub fn from_area(area: &Area, depth: usize) -> Self {
+    pub fn from_area(area: &Area, size: u8, depth: usize) -> Self {
         let mut solved = vec![];
         for cell in area {
             match cell {
@@ -13,15 +16,15 @@ impl Solution {
             }
         }
         return Self {
-            data: solved,
+            grid: Grid(solved, size),
             depth,
         };
     }
-    pub fn print_solution(&self) {
-        let size = (self.data.len() as f64).sqrt() as usize;
+    pub fn print(&self) {
+        let size = (self.grid.0.len() as f64).sqrt() as usize;
         println!("/{:-^1$}\\", "", 2 * size + 1);
-        for i in (0..self.data.len()).step_by(size) {
-            let row = &self.data[i..i + size];
+        for i in (0..self.grid.0.len()).step_by(size) {
+            let row = &self.grid.0[i..i + size];
             print!("| ");
             for cell in row {
                 print!("{cell} ");
@@ -37,7 +40,8 @@ pub enum Cell {
     Solution(u8),
     Possible(Vec<u8>),
 }
-type Area = Vec<Cell>; //I am not changing this to tuple struct
+type Area = Vec<Cell>; //I am NOT changing this to tuple struct
+                       //EDIT: okay i will rewrite this one day.....
 
 trait ApplyPossibilities {
     fn apply_sequences(&mut self, sequences: &Vec<Vec<u8>>);
@@ -112,8 +116,8 @@ impl BestCandidate for Area {
         return best_candidate;
     }
 }
-
-#[derive(Clone, Copy)]
+/// Variants of operations in KenKen cage
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum MathOp {
     Add,
     Sub,
@@ -121,11 +125,12 @@ pub enum MathOp {
     Div,
     Free,
 }
-#[derive(Clone)]
+/// Data type for KenKen cage
+#[derive(Clone, Debug)]
 pub struct Cage {
-    pub target: u16,
+    pub target: u32,
     pub operation: MathOp,
-    pub cells: Vec<usize>, //indexes, Need to be ordered
+    pub cells: Vec<usize>, //indexes, Need to be ordered start-end or end-start
 }
 impl Cage {
     fn solve(&self, area: &mut Area, size: u8) {
@@ -170,32 +175,86 @@ impl Cage {
         }
     }
 }
-#[derive(Clone)]
-pub struct KenkenBoard {
+
+macro_rules! unwrap_or_return {
+    ( $e:expr ) => {
+        match $e {
+            Ok(x) => x,
+            Err(e) => return Err(e),
+        }
+    };
+}
+#[derive(Clone, Copy, Debug)]
+pub enum SolverError {
+    /// Exceeded `maximum_depth`
+    DepthExceeded,
+}
+/// Structure defining puzzle in KenKen
+/// Used to find solutions for puzzle
+#[derive(Clone, Debug)]
+pub struct KenkenPuzzle {
     pub size: u8,
     pub cages: Vec<Cage>,
 }
-impl KenkenBoard {
-    pub fn with(size: u8, cages: Vec<Cage>) -> Self {
+impl KenkenPuzzle {
+    pub fn new(size: u8, cages: Vec<Cage>) -> Self {
         Self { size, cages }
+    }
+    pub fn format(&self) -> String {
+        let mut string = format!("{}<", self.size);
+        for cage in &self.cages {
+            let mut cell_str = String::from("");
+            for id in &cage.cells {
+                cell_str += &format!("{},", id);
+            }
+            cell_str.remove(cell_str.len() - 1);
+            string += &format!(
+                "{}.{}.{}>",
+                cage.target,
+                match cage.operation {
+                    MathOp::Add => "a",
+                    MathOp::Mul => "m",
+                    MathOp::Div => "d",
+                    MathOp::Sub => "s",
+                    MathOp::Free => "f",
+                },
+                cell_str
+            );
+        }
+        string
+    }
+    /// Finds and returns solutions to puzzle.
+    /// Time to solve rapidly grows with puzzle size.
+    /// # Arguments
+    /// * `max_depth` - Limits `depth` when solving puzzle. If exceeded search will be aborted and return `None`. (`depth` counts recursion cycles which occurs when guessing solutions is needed)
+    /// * 'max_solutions' - Stops search early if found enough solutions. When set to `0` solutions are unlimited.
+    pub fn solve(
+        &self,
+        max_depth: &usize,
+        max_solutions: &usize,
+    ) -> Result<Option<Vec<Solution>>, SolverError> {
+        //Returns all found solutions
+        return self.find_solutions(self.get_area(), 0, max_depth, max_solutions);
     }
     fn get_area(&self) -> Area {
         let possible = Vec::from_iter(1..self.size + 1);
         vec![Cell::Possible(possible); self.size as usize * self.size as usize]
     }
-    pub fn solve(&self) -> Option<Solution> {
-        //Returns first found solution
-        return self.find_first_solution(self.get_area(), 0);
-    }
-    pub fn solve_all(&self) -> Option<Vec<Solution>> {
-        //Returns all found solutions
-        return self.find_all_solutions(self.get_area(), 0);
-    }
-    fn find_first_solution(&self, mut board: Area, depth: usize) -> Option<Solution> {
-        //recursive function
+    /// Main
+    /// recursive function
+    fn find_solutions(
+        &self,
+        mut board: Area,
+        depth: usize,
+        max_depth: &usize,
+        max_solutions: &usize,
+    ) -> Result<Option<Vec<Solution>>, SolverError> {
+        if depth > *max_depth {
+            return Err(SolverError::DepthExceeded); //too deep, stop search
+        }
         let mut progress = true;
         while progress {
-            //Loop will continue as long we can solve cells with just deduction
+            //Loop will continue as long it can solve cells with just deduction
             progress = false;
             self.deduction(board.as_mut());
             for cell in board.iter_mut() {
@@ -203,7 +262,7 @@ impl KenkenBoard {
                     Cell::Possible(v) => {
                         if v.len() == 0 {
                             //Solution impossible in this state
-                            return None;
+                            return Ok(None);
                         } else if v.len() == 1 {
                             //Cell solved
                             *cell = Cell::Solution(v[0]);
@@ -214,87 +273,58 @@ impl KenkenBoard {
                 }
             }
         }
-        if let Some(candidate) = board.get_best_candidate() {
-            //Candidate with least possibilities
+        //Candidate with least possibilities
+        if let Option::Some(candidate) = board.get_best_candidate() {
             //guess
-            println!("Guessing..");
-            let mut guess = board.clone();
-            if let Cell::Possible(v) = &mut board[candidate.1] {
-                //To make a guess we will put possibility as solution into board clone and try to solve that
-                let num = v[0];
-                guess[candidate.1] = Cell::Solution(num);
-                //println!("guess: {num} at {}",candidate.1);
-                let solution = self.find_first_solution(guess, depth + 1);
-                if solution.is_some() {
-                    //Guess was correct
-                    return solution;
-                } else {
-                    //println!("wrong: {num} at {}",candidate.1);
-                    //We have ruled out a possibility, so we should rerun this function with currect board
-                    v.remove(0);
-                    return self.find_first_solution(board, depth + 1);
-                }
-            } else {
-                panic!("Cosmic ray detected.");
-            } //unreachable
-        } else {
-            return Some(Solution::from_area(&board, depth)); //no more candidates => all solved
-        }
-    }
-    fn find_all_solutions(&self, mut board: Area, depth: usize) -> Option<Vec<Solution>> {
-        //recursive function
-        let mut progress = true;
-        while progress {
-            //Loop will continue as long we can solve cells with just deduction
-            progress = false;
-            self.deduction(board.as_mut());
-            for cell in board.iter_mut() {
-                match cell {
-                    Cell::Possible(v) => {
-                        if v.len() == 0 {
-                            //Solution impossible in this state
-                            return None;
-                        } else if v.len() == 1 {
-                            //Cell solved
-                            *cell = Cell::Solution(v[0]);
-                            progress = true;
-                        }
-                    }
-                    _ => (),
-                }
-            }
-        }
-        if let Some(candidate) = board.get_best_candidate() {
-            //Candidate with least possibilities
-            //guess
-            println!("Guessing..");
             let mut guess = board.clone();
             if let Cell::Possible(v) = &mut board[candidate.1] {
                 let mut solutions = vec![];
-                //To make a guess we will put possibility as solution into board clone and try to solve that
+                //To make a guess put possibility as solution into board clone and try to solve that
                 let num = v[0];
                 guess[candidate.1] = Cell::Solution(num);
-                //println!("guess: {num} at {}",candidate.1);
-                if let Some(mut x) = self.find_all_solutions(guess, depth + 1) {
-                    //Guess was correct
-                    solutions.append(&mut x);
-                    v.remove(0);
-                    if let Some(mut y) = self.find_all_solutions(board, depth + 1) {
-                        //Don't pass analysis, because first solution was already found
-                        solutions.append(&mut y);
+                match unwrap_or_return!(self.find_solutions(
+                    guess,
+                    depth + 1,
+                    max_depth,
+                    max_solutions
+                )) {
+                    Some(mut sol1) => {
+                        //Guess was correct
+                        solutions.append(&mut sol1);
+                        if solutions.len() == *max_solutions {
+                            //found enough solutions
+                            return Ok(Some(solutions));
+                        }
+                        v.remove(0);
+                        //try remaining guesses
+                        match unwrap_or_return!(self.find_solutions(
+                            board,
+                            depth + 1,
+                            max_depth,
+                            max_solutions
+                        )) {
+                            Some(mut sol2) => {
+                                //Don't pass analysis, because first solution was already found
+                                solutions.append(&mut sol2);
+                                return Ok(Some(solutions));
+                            }
+                            None => return Ok(Some(solutions)),
+                        }
                     }
-                    return Some(solutions);
-                } else {
-                    //println!("wrong: {num} at {}",candidate.1);
-                    //We have ruled out a possibility, so we should rerun this function with currect board
-                    v.remove(0);
-                    return self.find_all_solutions(board, depth + 1);
+                    None => {
+                        //Ruled out a possibility, so rerun this function with currect board
+                        v.remove(0);
+                        return self.find_solutions(board, depth + 1, max_depth, max_solutions);
+                    }
                 }
             } else {
+                //unreachable
                 panic!("Cosmic ray detected.");
-            } //unreachable
+            }
         } else {
-            return Some(vec![Solution::from_area(&board, depth)]); //no more candidates => all solved
+            println!("sol");
+            return Ok(Some(vec![Solution::from_area(&board, self.size, depth)]));
+            //no more candidates => all solved
         }
     }
     fn deduction(&self, board: &mut Area) {
@@ -342,12 +372,13 @@ impl KenkenBoard {
         }
     }
 }
+// Generator functions to generate possible values in cage
 mod sequence_gen {
 
     use super::Cell;
     pub fn generate_sequences_sub(
         size: u8,
-        target: u16,
+        target: u32,
         area: Option<(&Cell, &Cell)>,
     ) -> Vec<(u8, u8)> {
         let t = target as u8;
@@ -414,7 +445,7 @@ mod sequence_gen {
     }
     pub fn generate_sequences_div(
         size: u8,
-        target: u16,
+        target: u32,
         area: Option<(&Cell, &Cell)>,
     ) -> Vec<(u8, u8)> {
         //DIV must be only on two cells
@@ -482,7 +513,7 @@ mod sequence_gen {
     pub fn generate_sequences_mul(
         len: usize,
         max: u8,
-        target: u16,
+        target: u32,
         area: Option<&Vec<Cell>>,
     ) -> Vec<Vec<u8>> {
         let mut sequences = Vec::new();
@@ -493,15 +524,15 @@ mod sequence_gen {
     fn gen_seq_mul_recursive(
         len: usize,
         max: u8,
-        target: u16,
+        target: u32,
         area: Option<&Vec<Cell>>,
         sequence: &mut Vec<u8>,
         sequences: &mut Vec<Vec<u8>>,
     ) {
         if sequence.len() == len {
-            let mut product = 1u16;
+            let mut product = 1u32;
             for n in sequence.iter() {
-                product *= *n as u16;
+                product *= *n as u32;
             }
             if product == target {
                 sequences.push(sequence.clone());
@@ -535,7 +566,7 @@ mod sequence_gen {
     pub fn generate_sequences_sum(
         len: usize,
         max: u8,
-        target: u16,
+        target: u32,
         area: Option<&Vec<Cell>>,
     ) -> Vec<Vec<u8>> {
         let mut sequences = Vec::new();
@@ -547,9 +578,9 @@ mod sequence_gen {
         sequence: &mut Vec<u8>,
         len: usize,
         max: u8,
-        target: u16,
+        target: u32,
         area: Option<&Vec<Cell>>,
-        sum: u16,
+        sum: u32,
     ) {
         if sequence.len() == len {
             if sum == target {
@@ -576,10 +607,10 @@ mod sequence_gen {
                     }
                 }
             }
-            if sum + num as u16 + (len - sequence.len() - 1) as u16 * 1 > target {
+            if sum + num as u32 + (len - sequence.len() - 1) as u32 * 1 > target {
                 continue;
             }
-            if sum + num as u16 + (len - sequence.len() - 1) as u16 * (max as u16) < target {
+            if sum + num as u32 + (len - sequence.len() - 1) as u32 * (max as u32) < target {
                 continue;
             }
             sequence.push(num);
@@ -590,7 +621,7 @@ mod sequence_gen {
                 max,
                 target,
                 area,
-                sum + (num as u16),
+                sum + (num as u32),
             );
             sequence.pop();
         }
@@ -625,7 +656,7 @@ mod tests {
     }
     #[test]
     fn solve_test() {
-        let board = KenkenBoard::with(3, vec![ //kenken tutorial puzzle
+        let board = KenkenPuzzle::new(3, vec![ //kenken tutorial puzzle
             Cage {target: 5, operation: MathOp::Add, cells: vec![0,1]},
             Cage {target: 3, operation: MathOp::Add, cells: vec![2,5]},
             Cage {target: 4, operation: MathOp::Add, cells: vec![3,6]},
@@ -633,7 +664,7 @@ mod tests {
             Cage {target: 3, operation: MathOp::Free, cells: vec![8]}
             ]);
         solve_test_board(&board, vec![2,3,1,3,1,2,1,2,3]);
-        let board = KenkenBoard::with(3, vec![
+        let board = KenkenPuzzle::new(3, vec![
             Cage {target: 5, operation: MathOp::Add, cells: vec![0,1]},
             Cage {target: 1, operation: MathOp::Sub, cells: vec![2,5]},
             Cage {target: 3, operation: MathOp::Div, cells: vec![3,4]},
@@ -641,7 +672,7 @@ mod tests {
             Cage {target: 3, operation: MathOp::Div, cells: vec![7,8]}
         ]);
         solve_test_board(&board, vec![3,2,1,1,3,2,2,1,3]);
-        let board = KenkenBoard::with(4, vec![
+        let board = KenkenPuzzle::new(4, vec![
             Cage {target: 24, operation: MathOp::Mul, cells: vec![0,4,5]},
             Cage {target: 2, operation: MathOp::Sub, cells: vec![1,2]},
             Cage {target: 7, operation: MathOp::Add, cells: vec![3,7,11]},
@@ -650,7 +681,7 @@ mod tests {
             Cage {target: 3, operation: MathOp::Sub, cells: vec![9,13]}
             ]);
         solve_test_board(&board, vec![4,3,1,2,3,2,4,1,2,1,3,4,1,4,2,3]);
-        let board = KenkenBoard::with(5, vec![
+        let board = KenkenPuzzle::new(5, vec![
             Cage {target: 3, operation: MathOp::Sub, cells: vec![0,5]},
             Cage {target: 12, operation: MathOp::Add, cells: vec![1,2,3]},
             Cage {target: 10, operation: MathOp::Mul, cells: vec![4,9]},
@@ -664,7 +695,7 @@ mod tests {
             Cage {target: 3, operation: MathOp::Free, cells: vec![20]}
             ]);
         solve_test_board(&board, vec![1,3,5,4,2,4,1,3,2,5,2,4,1,5,3,5,2,4,3,1,3,5,2,1,4]);
-        let board = KenkenBoard::with(9, vec![
+        let board = KenkenPuzzle::new(9, vec![
             Cage {target: 8, operation: MathOp::Sub, cells: vec![0,1]},
             Cage {target: 7, operation: MathOp::Free, cells: vec![2]},
             Cage {target: 2, operation: MathOp::Sub, cells: vec![3,4]},
@@ -707,9 +738,9 @@ mod tests {
                 7,2,1,9,6,8,5,3,4,2,5,9,8,1,3,6,4,7,1,7,5,4,9,2,3,6,8,
                 5,6,4,7,3,9,1,8,2,4,8,2,3,5,6,7,9,1,8,3,6,1,2,7,4,5,9]);
     }
-    fn solve_test_board(board: &KenkenBoard, expected: Vec<u8>) {
-        if let Some(x) = board.solve() {
-            assert_eq!(x.data, expected);
+    fn solve_test_board(board: &KenkenPuzzle, expected: Vec<u8>) {
+        if let Some(x) = board.solve(&40, &1).unwrap() {
+            assert_eq!(x[0].grid.0, expected);
         }
         else {
             assert!(false);
