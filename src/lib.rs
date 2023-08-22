@@ -1,4 +1,4 @@
-// TODO: Optimise, Rayon::scope, documentation, Serde serialization
+// TODO: Optimise, Logger, Rayon::scope, documentation, Serde serialization
 
 use rand::{distributions::Uniform, Rng};
 
@@ -76,4 +76,22 @@ impl Grid {
             }
         }
     }
+}
+
+/// Variants of operations in KenKen cage
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum MathOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Free,
+}
+/// Data type for KenKen cage
+#[derive(Clone, Debug)]
+pub struct Cage {
+    pub target: u32,
+    pub operation: MathOp,
+    ///indexes, Need to be ordered start-end or end-start
+    pub cells: Vec<usize>,
 }

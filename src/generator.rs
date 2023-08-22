@@ -1,14 +1,42 @@
-use super::Grid;
-use crate::solver::{Cage, KenkenPuzzle, MathOp};
+use super::{Cage, Grid, MathOp};
+use crate::solver::KenkenPuzzle;
 use rand::{distributions::WeightedIndex, prelude::Distribution, seq::SliceRandom, Rng};
 use std::cmp::{max, min};
 
+///`Difficulty` defines target difficulty for puzzle from generator
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Difficulty {
     Easy,
     Medium,
     Hard,
     Extreme,
     Any, //nolimit
+}
+impl Difficulty {
+    //Difficulty settings based on depth
+    fn from_depth(depth: usize) -> Self {
+        if depth == 0 {
+            return Difficulty::Easy;
+        }
+        if depth >= 1 && depth <= 2 {
+            return Difficulty::Medium;
+        }
+        if depth >= 3 && depth <= 5 {
+            return Difficulty::Hard;
+        }
+
+        return Difficulty::Extreme;
+    }
+    fn test_depth(&self, depth: usize) -> bool {
+        match self {
+            Difficulty::Any => {
+                return true;
+            }
+            d => {
+                return *d == Difficulty::from_depth(depth);
+            }
+        }
+    }
 }
 enum Directions {
     Up,
@@ -48,6 +76,11 @@ impl KenkenGenerator {
             },
         }
     }
+    ///Generate KenKen puzzles with current generator instance.
+    /// # Arguments
+    /// * `count` - Target number of puzzles to return.
+    /// * `validate` - Throw away every puzzle that isn't valid KenKen puzzle and doesn't satisfy `difficulty` and 'unique'.
+    /// * `grid` - If specified, this grid will be used to create cages, instead of random grid.
     pub fn generate_puzzles(
         &self,
         count: u32,
@@ -83,31 +116,8 @@ impl KenkenGenerator {
                 if solutions.len() != 1 && self.unique {
                     return false;
                 }
-                match self.difficulty {
-                    Difficulty::Easy => {
-                        if solutions[0].depth > 0 {
-                            return false;
-                        }
-                    }
-                    Difficulty::Medium => {
-                        if solutions[0].depth < 1 || solutions[0].depth > 2 {
-                            return false;
-                        }
-                    }
-                    Difficulty::Hard => {
-                        if solutions[0].depth < 3 || solutions[0].depth > 5 {
-                            return false;
-                        }
-                    }
-                    Difficulty::Extreme => {
-                        if solutions[0].depth < 6 {
-                            return false;
-                        }
-                    }
-                    Difficulty::Any => (),
-                }
 
-                return true;
+                return self.difficulty.test_depth(solutions[0].depth);
             }
         } else {
             println!("too deep")

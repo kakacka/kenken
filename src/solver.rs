@@ -1,9 +1,11 @@
-use super::Grid;
+use super::{Cage, Grid, MathOp};
 
 /// Stores grid and depth where the solution was found
 #[derive(Clone, Debug)]
 pub struct Solution {
+    /// 'grid' contains found solution
     pub grid: Grid,
+    /// `depth` counts recursion cycles which occurs when guessing solutions is needed
     pub depth: usize,
 }
 impl Solution {
@@ -19,19 +21,6 @@ impl Solution {
             grid: Grid(solved, size),
             depth,
         };
-    }
-    pub fn print(&self) {
-        let size = (self.grid.0.len() as f64).sqrt() as usize;
-        println!("/{:-^1$}\\", "", 2 * size + 1);
-        for i in (0..self.grid.0.len()).step_by(size) {
-            let row = &self.grid.0[i..i + size];
-            print!("| ");
-            for cell in row {
-                print!("{cell} ");
-            }
-            println!("|");
-        }
-        println!("\\{:-^1$}/", "", 2 * size + 1);
     }
 }
 
@@ -116,22 +105,7 @@ impl BestCandidate for Area {
         return best_candidate;
     }
 }
-/// Variants of operations in KenKen cage
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum MathOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Free,
-}
-/// Data type for KenKen cage
-#[derive(Clone, Debug)]
-pub struct Cage {
-    pub target: u32,
-    pub operation: MathOp,
-    pub cells: Vec<usize>, //indexes, Need to be ordered start-end or end-start
-}
+
 impl Cage {
     fn solve(&self, area: &mut Area, size: u8) {
         let len = area.len();
@@ -184,6 +158,7 @@ macro_rules! unwrap_or_return {
         }
     };
 }
+/// Defines solver errors
 #[derive(Clone, Copy, Debug)]
 pub enum SolverError {
     /// Exceeded `maximum_depth`
@@ -240,8 +215,7 @@ impl KenkenPuzzle {
         let possible = Vec::from_iter(1..self.size + 1);
         vec![Cell::Possible(possible); self.size as usize * self.size as usize]
     }
-    /// Main
-    /// recursive function
+    /// Main solver recursive function
     fn find_solutions(
         &self,
         mut board: Area,

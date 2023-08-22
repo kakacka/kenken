@@ -6,4 +6,5 @@ fn main() {
     let gen = KenkenGenerator::new(6, Difficulty::Extreme, 24, true, 5, None);
     println!("{:?}",gen.generate_puzzles(1, true, None)[0]);
 
+
 }
